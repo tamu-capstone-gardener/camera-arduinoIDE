@@ -4,15 +4,15 @@
 #include "esp_camera.h"
 #include "camera_pins.h"
 
-#define PLANT_MODULE_ID "8c6b5dcb-6451-4bfd-b9c2-bbf18e4c449a"
+#define PLANT_MODULE_ID "91c30fd3-a91f-4336-bb7b-891e11b2222f"
 
 // MQTT Broker details
 const char* MQTT_SERVER = "test.mosquitto.org";
 const int MQTT_PORT = 1883;
 
 // WiFi credentials
-const char* ssid = "ParkWest.SynergyWifi.com";
-const char* password = "Synergy.203.280.2029";
+const char* ssid = "AlexiPhone";
+const char* password = "Ale101810";
 
 // Global topics & variables
 char mqtt_topic[50];
@@ -73,10 +73,10 @@ void publishImageWithMarkers() {
   // show size, based on the quality this goes down
   Serial.printf("Captured Image, size: %d bytes\n", fb->len);
 
-  strcpy(mqtt_topic, "ESP32/Cam/ImagePart");
+  sprintf(mqtt_topic, "planthub/%s/photo", PLANT_MODULE_ID);
 
   // Send "START" marker
-  mqtt.publish(mqtt_topic, "START", false);
+  //mqtt.publish(mqtt_topic, "START", false);
   Serial.println("START Marker Sent");
   Serial.print("Frame buffer address start: ");
   Serial.println((uintptr_t)(fb->buf), HEX);
@@ -94,7 +94,7 @@ void publishImageWithMarkers() {
   }
 
   // Send "END" marker
-  mqtt.publish(mqtt_topic, "END", false);
+  // mqtt.publish(mqtt_topic, "END", false);
   Serial.println("Sent END marker");
 
   esp_camera_fb_return(fb);  // Free the frame buffer memory
@@ -129,7 +129,7 @@ void setup() {
   config.pixel_format = PIXFORMAT_JPEG; 
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 25;
+  config.jpeg_quality = 27;
   config.fb_count = 1;
 
   if (esp_camera_init(&config) != ESP_OK) {
