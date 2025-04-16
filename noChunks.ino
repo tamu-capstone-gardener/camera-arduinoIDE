@@ -7,12 +7,12 @@
 #define PLANT_MODULE_ID "91c30fd3-a91f-4336-bb7b-891e11b2222f"
 
 // MQTT Broker details
-const char* MQTT_SERVER = "test.mosquitto.org";
+const char* MQTT_SERVER = "******";
 const int MQTT_PORT = 1883;
 
 // WiFi credentials
-const char* ssid = "AlexiPhone";
-const char* password = "Ale101810";
+const char* ssid = "******";
+const char* password = "*******";
 
 // Global topics & variables
 char mqtt_topic[50];
