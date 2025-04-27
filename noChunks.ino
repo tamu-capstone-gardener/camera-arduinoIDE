@@ -1,18 +1,24 @@
 #include <WiFi.h>
-#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+#include "esp_wpa2.h"
 #include <PubSubClient.h>
 #include "esp_camera.h"
 #include "camera_pins.h"
 
-#define PLANT_MODULE_ID "91c30fd3-a91f-4336-bb7b-891e11b2222f"
+#define PLANT_MODULE_ID "****"
+#define MQTT_USERNAME "planthub"
+#define MQTT_PASSWORD "****"
+#define WIFI_USERNAME "****"
+#define WIFI_PASSWORD "****"
+#define WIFI_SSID "*****"
 
 // MQTT Broker details
-const char* MQTT_SERVER = "******";
-const int MQTT_PORT = 1883;
+const char* MQTT_SERVER = "*****";
+const int MQTT_PORT = ****;  // Use your broker's port
 
 // WiFi credentials
-const char* ssid = "******";
-const char* password = "*******";
+const char* ssid = "****";
+const char* password = "******";
 
 // Global topics & variables
 char mqtt_topic[50];
@@ -21,8 +27,35 @@ unsigned int t2 = 0;
 unsigned int latency = 0;
 
 // Create WiFi and MQTT clients
-WiFiClient wifiClient;
+WiFiClientSecure wifiClient;
 PubSubClient mqtt(wifiClient);
+
+// for TAMU WiFi
+// if using make sure to include esp_wpa2 
+void connectToWiFi() {
+  WiFi.disconnect(true);  // Reset WiFi
+
+  WiFi.mode(WIFI_STA);
+  esp_wifi_sta_wpa2_ent_enable();
+
+  // Set enterprise credentials
+  esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)WIFI_USERNAME, strlen(WIFI_USERNAME));
+  esp_wifi_sta_wpa2_ent_set_username((uint8_t *)WIFI_USERNAME, strlen(WIFI_USERNAME));
+  esp_wifi_sta_wpa2_ent_set_password((uint8_t *)WIFI_PASSWORD, strlen(WIFI_PASSWORD));
+
+  WiFi.begin(WIFI_SSID);  // Just SSID — no password here
+
+  Serial.print("Connecting to ");
+  Serial.println(WIFI_SSID);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print("WiFi Status: ");
+    Serial.println(WiFi.status());
+  }
+
+  Serial.println("\nConnected to WiFi.");
+  Serial.println(WiFi.localIP());
+}
 
 // Callback function for incoming MQTT messages
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -47,7 +80,7 @@ void reconnect() {
     String clientId = "ESP32Client-";
     clientId += String(random(0xffff), HEX);
     // Attempt to connect (no username or password in this example)
-    if (mqtt.connect(clientId.c_str())) {
+    if (mqtt.connect(clientId.c_str(), MQTT_USERNAME, MQTT_PASSWORD)) {
       Serial.println(" connected");
       // Resubscribe to topics as needed
       mqtt.subscribe("ESP32/Cam/Result");
@@ -62,21 +95,29 @@ void reconnect() {
 }
 
 void publishImageWithMarkers() {
-  // Capture image from camera
-  camera_fb_t *fb = esp_camera_fb_get();  
+  camera_fb_t *fb = esp_camera_fb_get();  // Capture image
   if (!fb) {
-    Serial.println("Camera capture failed! Restarting ESP...");
-    ESP.restart();
-    return;
+      Serial.println("Camera capture failed! Restarting ESP...");
+      ESP.restart();
+      return;
   }
 
-  // show size, based on the quality this goes down
   Serial.printf("Captured Image, size: %d bytes\n", fb->len);
 
+  const int chunkSize = 1024 * 4;  // 8KB per chunk
+  int totalSize = fb->len;
+  int NoI = totalSize / chunkSize;
   sprintf(mqtt_topic, "planthub/%s/photo", PLANT_MODULE_ID);
 
-  // Send "START" marker
-  //mqtt.publish(mqtt_topic, "START", false);
+  //   // Publish a simple test message
+  // if (mqtt.publish(mqtt_topic, "Test Message", false)) {
+  //   Serial.println("Test Message Sent Successfully");
+  // } else {
+  //   Serial.println("Test Message Failed");
+  // }
+
+  // Send "start" marker
+  mqtt.publish(mqtt_topic, "START", false);
   Serial.println("START Marker Sent");
   Serial.print("Frame buffer address start: ");
   Serial.println((uintptr_t)(fb->buf), HEX);
@@ -85,16 +126,36 @@ void publishImageWithMarkers() {
   Serial.print("Frame buffer address end: ");
   Serial.println((uintptr_t)(fb->buf + fb->len), HEX);
 
-  // Publish entire image payload in one go
-  bool success = mqtt.publish(mqtt_topic, fb->buf, fb->len, false);
-  if (success) {
-    Serial.println("Sent full image in one message");
-  } else {
-    Serial.println("Failed to send full image in one message");
+  // Transmit image chunks  
+  for (int i = 0; i < NoI; i++) {
+    Serial.print("Transmitting from address: ");
+    Serial.print((uintptr_t)(fb->buf + (i * chunkSize)), HEX);
+    Serial.print(" to ");
+    Serial.println((uintptr_t)(fb->buf + (i * chunkSize) + chunkSize), HEX);
+
+    // Publish each chunk (remove qos parameter)
+    bool success = mqtt.publish(mqtt_topic, fb->buf + (i * chunkSize), chunkSize, false);
+    if (!success) {
+      Serial.println("Failed to send image chunk!");
+      break;
+    }
+    Serial.printf("Sent chunk %d/%d (%d bytes)\n", i, totalSize / chunkSize, chunkSize);
+    delay(10);  // Small delay to prevent buffer overflow
   }
 
-  // Send "END" marker
-  // mqtt.publish(mqtt_topic, "END", false);
+  // Send the remaining bytes (if any)
+  int remaining = totalSize - (NoI * chunkSize);
+  if (remaining > 0) {
+    Serial.print("Transmitting last bytes from address: ");
+    Serial.print((uintptr_t)(fb->buf + (NoI * chunkSize)), HEX);
+    Serial.print(" to ");
+    Serial.println((uintptr_t)(fb->buf + (NoI * chunkSize) + remaining), HEX);
+    mqtt.publish(mqtt_topic, fb->buf + (NoI * chunkSize), remaining, false);
+    Serial.println("Sent last bytes");
+  }
+
+  // Send "end" marker
+  mqtt.publish(mqtt_topic, "END", false);
   Serial.println("Sent END marker");
 
   esp_camera_fb_return(fb);  // Free the frame buffer memory
@@ -104,7 +165,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
 
-  // Initialize camera configuration
+  // Initialize camera configuration (remains similar)
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -129,7 +190,7 @@ void setup() {
   config.pixel_format = PIXFORMAT_JPEG; 
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 27;
+  config.jpeg_quality = 25;
   config.fb_count = 1;
 
   if (esp_camera_init(&config) != ESP_OK) {
@@ -143,25 +204,27 @@ void setup() {
   }
 
   // Connect to WiFi
-  WiFi.begin(ssid, password);
-  WiFi.setSleep(false);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("WiFi connected");
+  connectToWiFi();
+  // WiFi.begin(ssid, password);
+  // WiFi.setSleep(false);
+  // while (WiFi.status() != WL_CONNECTED) {
+  //     delay(500);
+  //     Serial.print(".");
+  // }
+  // Serial.println("");
+  // Serial.println("WiFi connected");
 
   // Initialize MQTT settings
+  wifiClient.setInsecure();
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
 
-  // Increase MQTT buffer to accommodate the full image payload
-  mqtt.setBufferSize(8192 * 7);
+  mqtt.setBufferSize(8192*7);
 
   // Immediately attempt to connect if not already connected
   reconnect();
 }
+
 
 void loop() {
   // Ensure the MQTT client remains connected
@@ -170,9 +233,10 @@ void loop() {
   }
   mqtt.loop();
 
-  // Publish the full image
+  // Publish the image
   publishImageWithMarkers();
 
-  // Increase delay between each picture (currently set to 10 seconds)
-  delay(10000);
+  // Optional delay between images
+  delay(30000);
 }
+
