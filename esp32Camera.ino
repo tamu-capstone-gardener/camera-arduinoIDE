@@ -203,8 +203,9 @@ void setup() {
     Serial.println("Detected Camera Lens: OV2640");
   }
 
-  // Connect to WiFi
+  // Connect to WiFi (via tamu)
   connectToWiFi();
+  // UNCOMMENT BELOW IF USING REGULAR WIFI
   // WiFi.begin(ssid, password);
   // WiFi.setSleep(false);
   // while (WiFi.status() != WL_CONNECTED) {
